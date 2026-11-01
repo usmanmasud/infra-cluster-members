@@ -1,0 +1,65 @@
+name: Members
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check profile cards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Only one card changed
+        if: github.event_name == 'pull_request'
+        run: |
+          changed=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
+          echo "Files changed in this PR:"; echo "$changed"
+          outside=$(echo "$changed" | grep -v '^members/' || true)
+          if [ -n "$outside" ]; then
+            echo "::error::Only add or edit your own card in members/. This PR also changes: $outside"
+            exit 1
+          fi
+          if echo "$changed" | grep -qx 'members/_template.md'; then
+            echo "::error::Don't edit the template. Copy it to members/<your-name>.md instead."
+            exit 1
+          fi
+      - name: Validate cards
+        run: node scripts/check-cards.mjs
+
+  deploy:
+    name: Publish Members Wall
+    needs: check
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/build-wall.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+      - id: deployment
+        uses: actions/deploy-pages@v4
